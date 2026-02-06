@@ -10,15 +10,19 @@ export default function Home() {
   const [result, setResult] = useState(null);
 
   useEffect(() => {
-    const session = supabase.auth.getSession().then(({ data }) => {
+    // Get current session on mount
+    supabase.auth.getSession().then(({ data }) => {
       setUser(data?.session?.user ?? null);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_, session) => {
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session?.user ?? null);
     });
 
-    return () => listener?.subscription?.unsubscribe?.();
+    return () => {
+      subscription?.unsubscribe?.();
+    };
   }, []);
 
   const signUp = async () => {
