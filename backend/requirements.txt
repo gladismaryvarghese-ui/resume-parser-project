@@ -3,4 +3,8 @@ flask-cors
 gunicorn
 spacy
 supabase
-python-Levenshtein  
+python-Levenshtein
+PyPDF2
+python-docx
+werkzeug
+  
