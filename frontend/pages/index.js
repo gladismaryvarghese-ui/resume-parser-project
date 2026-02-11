@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 import styles from "../styles/home.module.css";
 
@@ -11,6 +12,7 @@ export default function Home() {
   const [resumeFile, setResumeFile] = useState(null);
   const [jobDescription, setJobDescription] = useState("");
   const [parsedData, setParsedData] = useState(null);
+  const [resumeText, setResumeText] = useState("");
   const [matchResult, setMatchResult] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -70,7 +72,7 @@ export default function Home() {
 
     try {
       setUploadProgress(60);
-      const res = await fetch("/api/proxy/upload_resume_file", {
+      const res = await fetch("http://localhost:5000/upload_resume_file", {
         method: "POST",
         body: formData,
       });
@@ -79,7 +81,9 @@ export default function Home() {
       if (data.error) {
         alert(data.error);
       } else {
+        // store parsed fields and full extracted text
         setParsedData(data.data);
+        setResumeText(data.text || "");
         setUploadProgress(100);
       }
     } catch (err) {
@@ -90,28 +94,32 @@ export default function Home() {
     }
   };
 
-  const matchResume = async () => {
-    if (!parsedData?.keywords || !jobDescription) {
-      return alert("Please upload resume and enter job description");
-    }
-    setLoading(true);
+  const router = useRouter();
 
-    try {
-      const res = await fetch("/api/proxy/parse_resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          resume: resumeFile ? parsedData.keywords.join(" ") : "",
-          job_description: jobDescription,
-        }),
-      });
-      const data = await res.json();
-      setMatchResult(data);
-    } catch (err) {
-      alert("Error matching resume: " + err.message);
-    } finally {
-      setLoading(false);
+  const matchResume = async () => {
+    // keep button always visible; validate inputs and navigate to /results
+    if (!parsedData) {
+      alert("Please upload a resume first.");
+      return;
     }
+    if (!jobDescription || !jobDescription.trim()) {
+      alert("Please enter a job description.");
+      return;
+    }
+
+    // store inputs in sessionStorage for the /results page to consume
+    const payload = {
+      resumeText: resumeText || parsedData.keywords?.join(" ") || "",
+      jobDescription: jobDescription,
+      parsedData: parsedData,
+    };
+    try {
+      sessionStorage.setItem("analysis_input", JSON.stringify(payload));
+    } catch (e) {
+      console.warn("Could not save analysis input to sessionStorage", e);
+    }
+
+    router.push("/results");
   };
 
   if (!user) {
@@ -264,8 +272,8 @@ export default function Home() {
               />
             </div>
 
-            <button onClick={matchResume} disabled={loading || !parsedData} className={styles.primaryBtn}>
-              {loading ? "Analyzing..." : "Analyze Match"}
+            <button onClick={matchResume} disabled={!parsedData || !jobDescription.trim()} className={styles.primaryBtn}>
+              {loading ? "⏳ Analyzing..." : "📊 Analyze Match"}
             </button>
           </div>
         </div>
@@ -287,6 +295,17 @@ export default function Home() {
               </div>
             </div>
 
+            <div className={styles.scoreGrid}>
+              <div className={styles.scoreBox}>
+                <div className={styles.scoreValue}>{matchResult.strength_score}%</div>
+                <div className={styles.scoreLabel}>Strength Score</div>
+              </div>
+              <div className={styles.scoreBox}>
+                <div className={styles.scoreValue}>{matchResult.years_experience} yrs</div>
+                <div className={styles.scoreLabel}>Experience</div>
+              </div>
+            </div>
+
             {/* Feedback */}
             {matchResult.feedback && (
               <div className={styles.feedbackSection}>
@@ -299,6 +318,19 @@ export default function Home() {
                 </div>
               </div>
             )}
+
+            {/* Core summary and eligibility */}
+            {matchResult.core_summary && (
+              <div className={styles.summarySection}>
+                <h3>🔎 Resume Core Summary</h3>
+                <div className={styles.summaryBox}>{matchResult.core_summary}</div>
+              </div>
+            )}
+
+            <div className={styles.eligibilityRow}>
+              <strong>Eligibility:</strong>
+              <span style={{ marginLeft: 8 }}>{matchResult.eligible ? 'Eligible ✅' : 'Not Eligible ❌'}</span>
+            </div>
 
             {/* Matched Skills */}
             {matchResult.matched_skills && matchResult.matched_skills.length > 0 && (

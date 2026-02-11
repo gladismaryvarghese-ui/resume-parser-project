@@ -383,25 +383,6 @@
   font-weight: 500;
 }
 
-/* Textarea */
-textarea {
-  width: 100%;
-  padding: 1rem;
-  border: 2px solid #eee;
-  border-radius: 10px;
-  font-family: inherit;
-  font-size: 0.95rem;
-  resize: vertical;
-  transition: all 0.3s ease;
-  box-sizing: border-box;
-}
-
-textarea:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
 /* Results Card */
 .resultsCard {
   background: white;

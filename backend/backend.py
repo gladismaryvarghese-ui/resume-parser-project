@@ -1,271 +1,159 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-from supabase import create_client, Client
 import spacy
 import re
-import io
-from werkzeug.utils import secure_filename
 import PyPDF2
 from docx import Document
 
 app = Flask(__name__)
 CORS(app)
 
-# Supabase connection
-SUPABASE_URL = "https://zpekfqaxzogbitavotzt.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwZWtmcWF4em9nYml0YXZvdHp0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Nzc5Mzg5NSwiZXhwIjoyMDgzMzY5ODk1fQ.oldtB8_dkxBZPQzLK1e9PECmo5r53dQlqoonpjDChBs"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Load NLP model
 nlp = spacy.load("en_core_web_sm")
 
-# ==================== HELPER FUNCTIONS ====================
+# ================= TEXT EXTRACTION =================
 
 def extract_text_from_pdf(file_stream):
-    """Extract text from PDF"""
-    try:
-        reader = PyPDF2.PdfReader(file_stream)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text()
-        return text
-    except Exception as e:
-        return f"Error reading PDF: {str(e)}"
+    file_stream.seek(0)
+    reader = PyPDF2.PdfReader(file_stream)
+    text = ""
+    for page in reader.pages:
+        extracted = page.extract_text()
+        if extracted:
+            text += extracted + "\n"
+    return text.strip()
 
 def extract_text_from_docx(file_stream):
-    """Extract text from DOCX"""
-    try:
-        doc = Document(file_stream)
-        text = "\n".join([para.text for para in doc.paragraphs])
-        return text
-    except Exception as e:
-        return f"Error reading DOCX: {str(e)}"
+    file_stream.seek(0)
+    doc = Document(file_stream)
+    return "\n".join([p.text for p in doc.paragraphs]).strip()
 
 def extract_text_from_txt(file_stream):
-    """Extract text from TXT"""
-    try:
-        text = file_stream.read().decode('utf-8')
-        return text
-    except Exception as e:
-        return f"Error reading TXT: {str(e)}"
+    return file_stream.read().decode("utf-8", errors="ignore")
+
+# ================= EXTRACTION HELPERS =================
 
 def extract_email(text):
-    """Extract email from text"""
-    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-    emails = re.findall(email_pattern, text)
-    return emails[0] if emails else None
+    match = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+    return match[0] if match else None
 
 def extract_phone(text):
-    """Extract phone number"""
-    phone_pattern = r'[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}'
-    phones = re.findall(phone_pattern, text)
-    return phones[0] if phones else None
-
-def extract_name(text):
-    """Extract name from first line or using NLP"""
-    lines = text.split('\n')
-    first_line = lines[0].strip() if lines else ""
-    
-    # Try first non-empty line (usually name)
-    if first_line and len(first_line.split()) <= 5:
-        return first_line
-    
-    # Fallback to NLP
-    doc = nlp(text[:500])
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            return ent.text
-    
-    return None
-
-def extract_skills(text, common_skills=None):
-    """Extract skills from text"""
-    if common_skills is None:
-        common_skills = [
-            "python", "java", "javascript", "typescript", "react", "angular", "vue",
-            "node", "express", "django", "flask", "sql", "mongodb", "postgresql",
-            "aws", "azure", "gcp", "docker", "kubernetes", "git", "linux",
-            "html", "css", "scss", "bootstrap", "tailwind", "webpack", "babel",
-            "rest", "graphql", "api", "microservices", "agile", "scrum", "jira",
-            "jenkins", "ci/cd", "devops", "machine learning", "tensorflow", "pytorch",
-            "pandas", "numpy", "scikit-learn", "nlp", "computer vision", "excel",
-            "power bi", "tableau", "salesforce", "sap", "oracle", "hadoop", "spark"
-        ]
-    
-    text_lower = text.lower()
-    skills_found = []
-    for skill in common_skills:
-        if skill in text_lower:
-            skills_found.append(skill)
-    
-    return list(set(skills_found))
+    match = re.findall(r'[\+]?\d[\d\s\-]{8,15}', text)
+    return match[0] if match else None
 
 def extract_experience(text):
-    """Extract years of experience"""
-    experience_pattern = r'(\d+)\+?\s*(?:years?|yrs|yoe)'
-    matches = re.findall(experience_pattern, text.lower())
-    return int(matches[0]) if matches else None
+    match = re.findall(r'(\d+)\+?\s*(years?|yrs|yoe)', text.lower())
+    return int(match[0][0]) if match else 0
 
-def extract_education(text):
-    """Extract education details"""
-    qualifications = []
-    education_keywords = [
-        "bachelor", "master", "phd", "diploma", "b.tech", "m.tech", "b.a", "m.a",
-        "bsc", "msc", "be", "me", "ca", "cfa", "aws certified", "kubernetes", "scrum"
+def extract_skills(text):
+    common_skills = [
+        "python","java","javascript","react","node","django","flask",
+        "sql","mongodb","aws","docker","kubernetes","machine learning",
+        "tensorflow","pytorch","pandas","numpy","excel"
     ]
-    
-    text_lower = text.lower()
-    for edu in education_keywords:
-        if edu in text_lower:
-            qualifications.append(edu.title())
-    
-    return list(set(qualifications))
+    text = text.lower()
+    return list(set([skill for skill in common_skills if skill in text]))
 
 def extract_keywords(text):
-    """Extract keywords using spaCy"""
     doc = nlp(text)
-    keywords = [token.lemma_.lower() for token in doc if not token.is_stop and token.is_alpha and len(token.text) > 3]
-    return sorted(list(dict.fromkeys(keywords)))
+    return list(set([token.lemma_.lower()
+                     for token in doc
+                     if token.is_alpha and not token.is_stop and len(token.text) > 3]))
 
 def parse_resume(text):
-    """Parse resume and extract structured data"""
     return {
-        "name": extract_name(text),
         "email": extract_email(text),
         "phone": extract_phone(text),
         "skills": extract_skills(text),
         "experience": extract_experience(text),
-        "education": extract_education(text),
         "keywords": extract_keywords(text)
     }
 
-# ==================== ROUTES ====================
+# ================= ROUTES =================
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
-    return jsonify({"message": "Resume Parser Backend is running!"})
+    return jsonify({"message": "Backend Running Successfully"})
 
 @app.route("/upload_resume_file", methods=["POST"])
 def upload_resume_file():
-    """Upload and parse resume from file (PDF, DOCX, or TXT)"""
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
-    
+
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
-    
-    filename = secure_filename(file.filename)
-    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-    
-    # Extract text based on file type
-    text = None
-    if file_ext == 'pdf':
+    filename = file.filename.lower()
+
+    if filename.endswith(".pdf"):
         text = extract_text_from_pdf(file.stream)
-    elif file_ext in ['docx', 'doc']:
+    elif filename.endswith(".docx") or filename.endswith(".doc"):
         text = extract_text_from_docx(file.stream)
-    elif file_ext in ['txt', 'text']:
+    elif filename.endswith(".txt"):
         text = extract_text_from_txt(file.stream)
     else:
-        return jsonify({"error": f"Unsupported file type: {file_ext}"}), 400
-    
-    if not text or text.startswith("Error"):
-        return jsonify({"error": text or "Could not extract text from file"}), 400
-    
-    # Parse the resume
-    parsed_data = parse_resume(text)
-    
+        return jsonify({"error": "Unsupported file type"}), 400
+
+    if not text:
+        return jsonify({"error": "Could not extract text"}), 400
+
+    parsed = parse_resume(text)
+
     return jsonify({
-        "message": "Resume parsed successfully",
-        "filename": filename,
-        "data": parsed_data
+        "data": parsed,
+        "text": text
     })
 
+
 @app.route("/parse_resume", methods=["POST"])
-def parse_resume_endpoint():
-    """Parse resume text and match against job description"""
-    data = request.json or {}
+def analyze_resume():
+    data = request.json
     resume_text = data.get("resume", "")
     job_description = data.get("job_description", "")
-    
-    if not resume_text:
-        return jsonify({"error": "Resume text required"}), 400
-    
-    # Parse resume
-    parsed_resume = parse_resume(resume_text)
-    resume_keywords = parsed_resume["keywords"]
-    resume_skills = parsed_resume["skills"]
-    
-    # Extract job keywords and skills
-    job_keywords = extract_keywords(job_description)
-    job_skills = extract_skills(job_description)
-    
-    # Compute matching
-    resume_set = set(resume_keywords)
-    job_set = set(job_keywords)
-    
-    if len(job_keywords) == 0:
-        accuracy = 0.0
-    else:
-        matched = job_set.intersection(resume_set)
-        accuracy = round((len(matched) / len(job_keywords)) * 100, 2)
-    
-    # Skill matching
-    resume_skills_set = set(resume_skills)
-    job_skills_set = set(job_skills)
-    matched_skills = resume_skills_set.intersection(job_skills_set)
-    missing_skills = job_skills_set.difference(resume_skills_set)
-    
-    if len(job_skills_set) == 0:
-        skill_match_percent = 0.0
-    else:
-        skill_match_percent = round((len(matched_skills) / len(job_skills_set)) * 100, 2)
-    
-    # Generate feedback
-    feedback = {
-        "overall": f"Your resume has a {accuracy}% keyword match with the job description.",
-        "skills": f"You have {len(matched_skills)} out of {len(job_skills_set)} required skills ({skill_match_percent}% match).",
-        "strengths": f"Strong in: {', '.join(list(matched_skills)[:5]) if matched_skills else 'No matching skills found'}",
-        "improvements": f"Consider developing: {', '.join(list(missing_skills)[:5]) if missing_skills else 'You have all required skills!'}"
-    }
-    
-    result = {
-        "parsed_resume": parsed_resume,
-        "job_keywords": job_keywords,
-        "matched_keywords": sorted(list(job_set.intersection(resume_set))),
-        "missing_keywords": sorted(list(job_set.difference(resume_set))),
-        "accuracy_percent": accuracy,
-        "job_skills": job_skills,
-        "matched_skills": sorted(list(matched_skills)),
-        "missing_skills": sorted(list(missing_skills)),
-        "skill_match_percent": skill_match_percent,
-        "feedback": feedback
-    }
-    
-    return jsonify(result)
 
-@app.route("/seed", methods=["POST", "GET"])
-def seed_db():
-    """Seed database with sample data"""
-    job_texts = [
-        "Senior Python Developer with experience in Django and Flask",
-        "Frontend Engineer skilled in React, TypeScript, and CSS",
-        "Data Scientist familiar with pandas, scikit-learn, and deep learning",
-        "DevOps Engineer experienced with Docker, Kubernetes, and CI/CD",
-        "Product Manager with B2B SaaS experience and stakeholder management",
-    ]
-    
-    job_records = []
-    for text in job_texts:
-        doc = nlp(text)
-        keywords = [token.lemma_ for token in doc if not token.is_stop]
-        job_records.append({"description": text, "keywords": keywords})
-    
-    try:
-        job_resp = supabase.table("job_descriptions").insert(job_records).execute()
-        return jsonify({"message": "Seed completed", "jobs_inserted": len(job_records)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    if not resume_text or not job_description:
+        return jsonify({"error": "Missing data"}), 400
+
+    parsed = parse_resume(resume_text)
+
+    resume_keywords = set(parsed["keywords"])
+    job_keywords = set(extract_keywords(job_description))
+
+    resume_skills = set(parsed["skills"])
+    job_skills = set(extract_skills(job_description))
+
+    # Keyword match
+    accuracy = round((len(resume_keywords & job_keywords) /
+                      len(job_keywords)) * 100, 2) if job_keywords else 0
+
+    # Skill match
+    skill_match = round((len(resume_skills & job_skills) /
+                         len(job_skills)) * 100, 2) if job_skills else 0
+
+    years = parsed["experience"]
+
+    if years <= 2:
+        level = "Junior"
+    elif years <= 5:
+        level = "Mid"
+    else:
+        level = "Senior"
+
+    strength_score = round((accuracy * 0.5) + (skill_match * 0.4) + (years * 2), 2)
+
+    eligible = strength_score >= 60 and skill_match >= 50
+
+    summary = resume_text[:300]
+
+    return jsonify({
+        "accuracy_percent": accuracy,
+        "skill_match_percent": skill_match,
+        "strength_score": strength_score,
+        "years_experience": years,
+        "experience_level": level,
+        "core_summary": summary,
+        "matched_skills": list(resume_skills & job_skills),
+        "missing_skills": list(job_skills - resume_skills),
+        "eligible": eligible
+    })
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(port=5000, debug=True)
