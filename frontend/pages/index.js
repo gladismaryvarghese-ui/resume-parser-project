@@ -72,7 +72,7 @@ export default function Home() {
 
     try {
       setUploadProgress(60);
-      const res = await fetch("http://localhost:5000/upload_resume_file", {
+      const res = await fetch("/api/proxy/upload_resume_file", {
         method: "POST",
         body: formData,
       });

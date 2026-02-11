@@ -32,7 +32,7 @@ export default function Results() {
       (async () => {
         setLoading(true);
         try {
-          const res = await fetch("http://localhost:5000/parse_resume", {
+          const res = await fetch("/api/proxy/parse_resume", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ resume: parsed.resumeText, job_description: parsed.jobDescription }),
