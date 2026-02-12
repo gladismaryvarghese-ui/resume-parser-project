@@ -8,7 +8,19 @@ from docx import Document
 app = Flask(__name__)
 CORS(app)
 
-nlp = spacy.load("en_core_web_sm")
+try:
+    nlp = spacy.load("en_core_web_sm")
+except Exception:
+    try:
+        # Try to download the model (may fail in restricted environments)
+        from spacy.cli import download
+        download("en_core_web_sm")
+        nlp = spacy.load("en_core_web_sm")
+    except Exception:
+        # Fallback to a blank English pipeline so the server can start.
+        # This will make keyword extraction weaker but prevents crashes.
+        nlp = spacy.blank("en")
+        print("Warning: 'en_core_web_sm' model not available — using blank 'en' pipeline.")
 
 # ================= TEXT EXTRACTION =================
 
